@@ -20,6 +20,10 @@ print(df)
 df.to_excel("MirScience/Datasets/BioProject/Bioprojects_"+Disease+".xlsx", index = False)
 df.to_csv("MirScience/Datasets/BioProject/Bioprojects_"+Disease+".tsv",sep = "\t", index = False)
 
+
+
+
+
 df5 = pd.DataFrame()
 not_in_SRA = []
 df4 = pd.DataFrame()
@@ -143,9 +147,13 @@ for geo_acc in df.loc[df["Project_Acc"].isin(not_in_SRA)]["Project_Acc"].unique(
         pass
 
 muestras_GEO_affi["Condition"] = "ND"
-muestras_GEO_affi.to_csv("MirScience/Datasets/BioProject/"+Disease+"_GEO_samples.csv",sep = ",", index = False)
 df3 = df3.loc[df3["entryType"]== "GSE"]                
 df3.to_excel("MirScience/Datasets/BioProject/"+Disease+"_GEO_projects.xlsx", index = False)
 df3.to_csv("MirScience/Datasets/BioProject/"+Disease+"_GEO_projects.tsv",sep = "\t", index = False)
+df3 = df3[["BioProjectID","taxon"]]
+df3["taxon"] = df3["taxon"].str.replace(" ","_")
+muestras_GEO_affi = pd.merge(muestras_GEO_affi,df3,on="BioProjectID")
+muestras_GEO_affi = muestras_GEO_affi[["Accession","Title","Accession2","GPL","BioProjectID","taxon","Condition"]]
+muestras_GEO_affi.to_csv("MirScience/Datasets/BioProject/"+Disease+"_GEO_samples.csv",sep = ",", index = False)
 df_not_GEO = pd.DataFrame(not_in_GEO)
 df_not_GEO.to_csv("MirScience/Datasets/BioProject/"+Disease+"_not_found_projects.txt")

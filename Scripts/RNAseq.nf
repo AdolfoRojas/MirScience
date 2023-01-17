@@ -10,6 +10,8 @@ params.Project = ""
 params.mod_FastP = ""
 params.Organism = ""
 params.Library_Layout = ""
+params.Control_name = "Control"
+params.Case_name = "Case"
 // Channels definition
 //ref_genome_ch = channel.fromPath(params.ref_genome)
 //read_pairs_ch = channel.fromFilePairs( params.reads, checkIfExists: true) 
@@ -21,7 +23,7 @@ process Dowload_fastqs {   //fastq-dump --split-files --gzip ${run_acc}
     maxForks 1   
     errorStrategy 'retry'
     maxRetries 3
-    tag "Dowload fastqs on $run_acc"
+    tag "Download fastqs on $run_acc"
 
     input:
     val(run_acc)
@@ -83,7 +85,30 @@ process FASTP {    //
         """
     else if (params.Library_Layout == "SINGLE")     
         """
-        fastp --thread $task.cpus $params.mod_FastP --in1 ${reads[0]} --length_required 40 y--cut_right --cut_right_window_size 4 --cut_right_mean_quality 30 --trim_tail1=5 --trim_front1=15 --out1 '$sample_id'_trimmed_R1.fastq.gz
+        fastp --thread $task.cpus $params.mod_FastP --in1 ${reads[0]} --length_required 40 --cut_right --cut_right_window_size 4 --cut_right_mean_quality 30 --trim_tail1=5 --trim_front1=15 --out1 '$sample_id'_trimmed_R1.fastq.gz
+        """
+    else
+        error "Undefined Library_Layout mode: $params.Library_Layout"
+}
+process FASTP_short_reads {    //
+    maxForks 5    
+    publishDir "${params.outdir}/Trimmed", mode:'copy', pattern: '*.fastq.gz' 
+    tag "FASTP on $sample_id"    
+    
+    input:
+    tuple val(sample_id), path(reads)
+
+    output:
+    tuple val(sample_id), path("${sample_id}_trimmed_R{1,2}.fastq.gz"), emit: trimmed_reads
+    
+    script:
+    if (params.Library_Layout == "PAIRED")    
+        """
+        fastp --thread $task.cpus $params.mod_FastP --in1 ${reads[0]} --in2 ${reads[1]} --length_required 30 --detect_adapter_for_pe --cut_right --cut_right_window_size 4 --cut_right_mean_quality 30 --trim_front1=10 --trim_front2=10 --out1 '$sample_id'_trimmed_R1.fastq.gz --out2 '$sample_id'_trimmed_R2.fastq.gz
+        """
+    else if (params.Library_Layout == "SINGLE")     
+        """
+        fastp --thread $task.cpus $params.mod_FastP --in1 ${reads[0]} --length_required 30 --cut_right --cut_right_window_size 4 --cut_right_mean_quality 30 --trim_front1=10 --out1 '$sample_id'_trimmed_R1.fastq.gz
         """
     else
         error "Undefined Library_Layout mode: $params.Library_Layout"
@@ -237,7 +262,7 @@ process FeatureCounts {    //
 }
 process Process_miRNAs_fastq {
     conda "/media/storage2/software/anaconda3/envs/miRDeep2" 
-    maxForks 2       
+    maxForks 5       
     tag "Process_miRNAs_fastq on $sample_id"
     
     input:
@@ -256,7 +281,6 @@ process Process_miRNAs_fastq {
     """
 }
 process Process_read_counts_files {    
-    publishDir params.outdir, mode:'copy'  
     maxForks 2 
 
     input:
@@ -344,10 +368,11 @@ process DESeq2 {
     gencode_info\$gene_id <- sapply(strsplit(gencode_info\$gene_id,".",fixed=T), "[", 1)
     sample_data <- read.delim("${Sample_table}", sep = ",")
     sample_data <- sample_data[sample_data\$BioProjectID == "${Project}",]
-    sample_data <- sample_data[sample_data\$Condition != "ND",]
+    sample_data <- sample_data[sample_data\$Condition != "ND",]    
+    sample_data\$Condition <- gsub("1", "${params.Case_name}", sample_data\$Condition)
+    sample_data\$Condition <- gsub("0", "${params.Control_name}", sample_data\$Condition) 
+    write.csv(sample_data, file="Samples_${Project}_${params.Control_name}_vs_${params.Case_name}.csv", row.names = F)
     sample_data <- sample_data[c("Run_acc","Condition")]
-    sample_data\$Condition <- gsub("1", "Case", sample_data\$Condition)
-    sample_data\$Condition <- gsub("0", "Control", sample_data\$Condition) 
     names(sample_data) <- c("column", "Condition")
     coldata <- sample_data 
     matrix <- as.data.frame(expr0)    
@@ -356,11 +381,11 @@ process DESeq2 {
     dds <- DESeqDataSetFromMatrix(countData = cts, colData = coldata, design = ~ Condition)
     keep <- rowSums(counts(dds)) > 1 ## Pre-Filtering
     dds <- dds[keep,]
-    dds\$Condition <- factor(dds\$Condition, levels = c("Control","Case"))
+    dds\$Condition <- factor(dds\$Condition, levels = c("${params.Control_name}","${params.Case_name}"))
     dds\$Condition <- droplevels(dds\$Condition)
     dds <- DESeq(dds, fitType="local", parallel = TRUE)        
     DESeq_norm <- counts(dds, normalized=T)
-    write.table(DESeq_norm, file = paste0(RNAs,"_DESeq_norm_matrix_WT.csv"), row.names = T, quote = F, col.names = T, sep = ",")  
+    write.table(DESeq_norm, file = paste0(RNAs,"_${Project}_${params.Control_name}_vs_${params.Case_name}_DESeq_norm_matrix_WT.csv"), row.names = T, quote = F, col.names = T, sep = ",")  
     vsd <- varianceStabilizingTransformation(dds, blind=FALSE)
     pcaData <- plotPCA(vsd, intgroup="Condition", returnData=TRUE)
     percentVar <- round(100 * attr(pcaData, "percentVar"))
@@ -372,7 +397,7 @@ process DESeq2 {
     ylab(paste0("PC2: ",percentVar[2],"% variance")) +
     coord_fixed() +
     scale_color_manual(values=c("#56B4E9", "red"))
-    ggsave(paste(RNAs,"_PCA_plot.png", sep = ""), plot = p, width = 8, height = 8, dpi = 300, units = "in")
+    ggsave(paste0(RNAs,"_${Project}_${params.Control_name}_vs_${params.Case_name}_PCA_plot.png"), plot = p, width = 8, height = 8, dpi = 300, units = "in")
     res <- results(dds, parallel = TRUE)
     res2 <- as.data.frame(res)
     res2 <- merge(res2, gencode_info, by.x = "row.names",by.y = "gene_id")
@@ -408,9 +433,10 @@ process DESeq2_miRNAs {
     sample_data <- read.delim("${Sample_table}", sep = ",")
     sample_data <- sample_data[sample_data\$BioProjectID == "${Project}",]
     sample_data <- sample_data[sample_data\$Condition != "ND",]
+    sample_data\$Condition <- gsub("1", "${params.Case_name}", sample_data\$Condition)
+    sample_data\$Condition <- gsub("0", "${params.Control_name}", sample_data\$Condition) 
+    write.csv(sample_data, file="Samples_${Project}_${params.Control_name}_vs_${params.Case_name}.csv", row.names = F)
     sample_data <- sample_data[c("Run_acc","Condition")]
-    sample_data\$Condition <- gsub("1", "Case", sample_data\$Condition)
-    sample_data\$Condition <- gsub("0", "Control", sample_data\$Condition) 
     names(sample_data) <- c("column", "Condition")
     coldata <- sample_data 
     matrix <- as.data.frame(expr0)    
@@ -419,11 +445,11 @@ process DESeq2_miRNAs {
     dds <- DESeqDataSetFromMatrix(countData = cts, colData = coldata, design = ~ Condition)
     keep <- rowSums(counts(dds)) > 1 ## Pre-Filtering
     dds <- dds[keep,]
-    dds\$Condition <- factor(dds\$Condition, levels = c("Control","Case"))
+    dds\$Condition <- factor(dds\$Condition, levels = c("${params.Control_name}","${params.Case_name}"))
     dds\$Condition <- droplevels(dds\$Condition)
     dds <- DESeq(dds, fitType="local", parallel = TRUE)        
     DESeq_norm <- counts(dds, normalized=T)
-    write.table(DESeq_norm, file = paste0(RNAs,"_DESeq_norm_matrix_WT.csv"), row.names = T, quote = F, col.names = T, sep = ",")  
+    write.table(DESeq_norm, file = paste0(RNAs,"_${Project}_${params.Control_name}_vs_${params.Case_name}_DESeq_norm_matrix_WT.csv"), row.names = T, quote = F, col.names = T, sep = ",")  
     vsd <- varianceStabilizingTransformation(dds, blind=FALSE)
     pcaData <- plotPCA(vsd, intgroup="Condition", returnData=TRUE)
     percentVar <- round(100 * attr(pcaData, "percentVar"))
@@ -435,7 +461,7 @@ process DESeq2_miRNAs {
     ylab(paste0("PC2: ",percentVar[2],"% variance")) +
     coord_fixed() +
     scale_color_manual(values=c("#56B4E9", "red"))
-    ggsave(paste(RNAs,"_PCA_plot.png", sep = ""), plot = p, width = 8, height = 8, dpi = 300, units = "in")
+    ggsave(paste0(RNAs,"_${Project}_${params.Control_name}_vs_${params.Case_name}_PCA_plot.png"), plot = p, width = 8, height = 8, dpi = 300, units = "in")
     res <- results(dds, parallel = TRUE)
     res2 <- as.data.frame(res)
     res2\$L2FC_ABS <- abs(res2\$log2FoldChange)
@@ -467,6 +493,15 @@ workflow Trimm_miRNAs{
         MULTIQC(FASTQC.out.multiqc_input.collect(),"QC2")
         emit:
             FASTP_miRNAs.out.trimmed_reads
+}
+workflow Trimm_short_reads{
+    take: data
+    main:
+        FASTP_short_reads(data)    
+        FASTQC(FASTP_short_reads.out.trimmed_reads)    
+        MULTIQC(FASTQC.out.multiqc_input.collect(),"QC2")
+        emit:
+            FASTP_short_reads.out.trimmed_reads
 }
 workflow Map_and_count {
     take: data
@@ -555,6 +590,58 @@ workflow miRNAseq {
     Trimm_miRNAs(Dowload_fastqs.out.fastqs)
     Map_and_count_miRNAs(Trimm_miRNAs.out)
     DESeq2_miRNAs(Map_and_count_miRNAs.out,Sample_table,params.Project)  
+}
+workflow short_reads_RNAseq { 
+    params.outdir = "Resultados/${params.Organism}/${params.Library_Layout}/${params.Project}/"
+    out_dir = file(params.outdir)
+    out_dir.mkdir()
+    ST = Channel.fromPath(params.sample_table).splitCsv(header: true).filter(row -> row.Condition != "ND").filter(row -> row.BioProjectID == params.Project)
+    Sample_table = Channel.fromPath(params.sample_table)
+    Projects = ST.map { row-> tuple(row.Organism, row.Library_Layout, row.BioProjectID, row.Platform, row.Run_acc) } 
+    Info = Projects.map { it[0,1,2,3] }.unique()
+    Runs = Projects.map { it[4] }
+    if (params.Organism == "Mus_musculus"){
+        params.GTF = "/media/storage/datasets/gtf/mouse/gencode.vM27.annotation.gtf"
+        params.Annotation = "/media/storage/Adolfo/MirScience/IDs_equivalencias_gencode.vM27.txt"
+        params.transcripts_file = "/media/storage/Adolfo/MirScience/gencode.vM27.transcripts.fa"
+        params.index_genome = "/media/storage/datasets/indexes/hisat2_index/Mus_musculus/Mm_GRCm39/GRCm39"
+    } else if (params.Organism == "Homo_sapiens"){
+        params.GTF = "/media/storage/datasets/gtf/human/gencode.v38.annotation.gtf"
+        params.Annotation = "/media/storage/Adolfo/MirScience/IDs_equivalencias_gencode.v38.txt"
+        params.transcripts_file = "/media/storage/Adolfo/MirScience/gencode.v38.transcripts.fa"
+        params.index_genome = "/media/storage/datasets/indexes/hisat2_index/Homo_sapiens/grch38/genome"
+    } else {
+        close
+    }
+    if (params.mod_FastP == ""){    
+        print "\nCheck Information:\n $params.Project, $params.Library_Layout, NOT Nova or Nextseq, $params.Organism\n"
+    } else if (params.mod_FastP == "-g"){
+         print "\nCheck Information:\n$params.Project, $params.Library_Layout, IS Nova or Nextseq, $params.Organism\n"}
+    print 'If something is wrong press "ctrl + C" and change parameters eg. --mod_FastP="-g" (for novaseq or nextseq data)\nothers params are: Project, Library_layout, Organism'
+    print "Workflow project outdir " + params.outdir
+    Dowload_fastqs(Runs)
+    QC1(Dowload_fastqs.out.fastqs)
+    Trimm_short_reads(Dowload_fastqs.out.fastqs)
+    Map_and_count(Trimm_short_reads.out)  
+    Annotation_ch = Channel.fromPath(params.Annotation)
+    DESeq2(Map_and_count.out,Sample_table,Annotation_ch,params.Project)  
+}
+workflow Download_only { 
+    params.outdir = "Resultados/${params.Organism}/${params.Library_Layout}/${params.Project}/"
+    out_dir = file(params.outdir)
+    out_dir.mkdir()
+    ST = Channel.fromPath(params.sample_table).splitCsv(header: true).filter(row -> row.Condition != "ND").filter(row -> row.BioProjectID == params.Project)
+    Sample_table = Channel.fromPath(params.sample_table)
+    Projects = ST.map { row-> tuple(row.Organism, row.Library_Layout, row.BioProjectID, row.Platform, row.Run_acc) } 
+    Info = Projects.map { it[0,1,2,3] }.unique()
+    Runs = Projects.map { it[4] }
+    if (params.mod_FastP == ""){    
+        print "\nCheck Information:\n $params.Project, $params.Library_Layout, NOT Nova or Nextseq, $params.Organism\n"
+    } else if (params.mod_FastP == "-g"){
+         print "\nCheck Information:\n$params.Project, $params.Library_Layout, IS Nova or Nextseq, $params.Organism\n"}
+    print 'If something is wrong press "ctrl + C" and change parameters eg. --mod_FastP="-g" (for novaseq or nextseq data)\nothers params are: Project, Library_layout, Organism'
+    print "Workflow project outdir " + params.outdir
+    Dowload_fastqs(Runs)
 }
 workflow.onComplete {
 	log.info ( workflow.success ? "\nDone! Open the following report in your browser --> $params.outdir/multiqc_report.html\n" : "Oops .. something went wrong" )
