@@ -1,24 +1,15 @@
 #!/usr/bin/env nextflow
 nextflow.enable.dsl=2
 // Mandatory Params
-//params.reads = "Raw_data/*_{1,2}.fastq.gz" // Raw reads a analizar
-//params.outdir = "Resultados" // Directorio donde se guardaran archivos de interes
-//params.ref_genome = "output_data/genome.fasta"  // Genoma de referencia de la especie
 params.sample_table = "nash_samples_SRA.csv"
-// Optional Params
 params.Project = ""
 params.mod_FastP = ""
 params.Organism = ""
 params.Library_Layout = ""
 params.Control_name = "Control"
 params.Case_name = "Case"
-// Channels definition
-//ref_genome_ch = channel.fromPath(params.ref_genome)
-//read_pairs_ch = channel.fromFilePairs( params.reads, checkIfExists: true) 
-//out_dir = file(params.outdir)
-//out_dir.mkdir()
 
-process Dowload_fastqs {   //fastq-dump --split-files --gzip ${run_acc}
+process Dowload_fastqs {
     publishDir "${params.outdir}/Raw_data/", mode:'copy'
     maxForks 1   
     errorStrategy 'retry'
@@ -658,7 +649,3 @@ workflow.onComplete {
 
     //sendMail(to: 'adolfo.rojas@ug.uchile.cl', subject: 'My pipeline execution', body: msg)
 }
-
-//nextflow RNAseq.nf -entry QC1
-//nextflow RNAseq.nf -entry Trimm_QC2 --mod_FastP='-g'
-//nextflow RNAseq.nf -entry Map_and_count nextflow RNAseq.nf --sample_table= nash_samples_SRA_prueba.csv

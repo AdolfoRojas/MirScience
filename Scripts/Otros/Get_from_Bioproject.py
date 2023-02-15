@@ -114,7 +114,9 @@ df5_backup = df5.copy()
 df5 = df5.merge(df5_attr_df, on="Accession")
 df5.to_excel("MirScience/Datasets/BioProject/"+Disease+"_Biosample.xlsx", index = False)
 df5.to_csv("MirScience/Datasets/BioProject/"+Disease+"_Biosample.tsv",sep = "\t", index = False)
-df8  = df4.merge(df5,left_on="BiosampleID",right_on="Accession")
+
+
+df8 = df4.merge(df5,left_on="BiosampleID",right_on="Accession")
 df8.to_excel("MirScience/Datasets/BioProject/"+Disease+"_Biosample_SRA.xlsx", index = False)
 df8.to_csv("MirScience/Datasets/BioProject/"+Disease+"_Biosample_SRA.tsv",sep = "\t", index = False)
 df8 = df8[["BioProjectID","Run_acc","Library_Layout","Platform","Organism"]]
