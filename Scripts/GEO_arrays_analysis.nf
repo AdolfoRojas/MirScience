@@ -10,7 +10,7 @@ process Dowload_Datasets {
     publishDir "${params.outdir}/Raw_data/", mode:'copy'
     maxForks 1   
     errorStrategy 'retry'
-    maxRetries 3
+    maxRetries 10
     tag "Download datasets $accession"
 
     input:

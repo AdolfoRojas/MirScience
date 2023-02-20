@@ -29,7 +29,7 @@ not_in_SRA = []
 df4 = pd.DataFrame()
 for SRA_acc in df.loc[(df["TaxId"] == "10090") | (df["TaxId"] == "0") | (df["TaxId"]== "9606")]["Project_Acc"].unique():
     try:
-        Query3 = SRA_acc + '[BioProject] AND ("biomol rna"[Properties] AND "filetype fastq"[Properties]'
+        Query3 = SRA_acc + '[BioProject] AND ("biomol rna"[Properties] AND "filetype fastq"[Properties])'
         res3 = Entrez.read(Entrez.esearch(db="sra", term=Query3, retmode= "xml", RetMax = 200000, usehistory = "y"))                 
         file2 = Entrez.read(Entrez.esummary(db="sra", query_key = res3["QueryKey"], RetMax = 200000,WebEnv = res3["WebEnv"]))    
         df3_in_loop = pd.DataFrame(file2)

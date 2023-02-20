@@ -333,6 +333,7 @@ process DESeq2 {
     val(Project)
 
     output:
+    path("*.rds"), emit: rds
     path "*"
     
     script:
@@ -396,6 +397,7 @@ process DESeq2 {
     res2 <- res2[order(res2\$L2FC_ABS,decreasing=T),]
     write.csv(na.omit(res2[res2\$padj < 0.05,]), file=paste(RNAs,"_",levels(dds\$Condition)[1], "_vs_", levels(dds\$Condition)[2],"_DE.csv", sep= ""))
     write.csv(res2, file=paste(RNAs,"_",levels(dds\$Condition)[1], "_vs_", levels(dds\$Condition)[2],"_DE_NS.csv", sep= ""))
+    saveRDS(na.omit(res2[res2\$padj < 0.05,]), file = "${Project}_DEGs.rds")
     """
 }
 process DESeq2_miRNAs {    
@@ -460,6 +462,35 @@ process DESeq2_miRNAs {
     write.csv(na.omit(res2[res2\$padj < 0.05,]), file=paste(RNAs,"_",levels(dds\$Condition)[1], "_vs_", levels(dds\$Condition)[2],"_DE.csv", sep= ""))
     write.csv(res2, file=paste(RNAs,"_",levels(dds\$Condition)[1], "_vs_", levels(dds\$Condition)[2],"_DE_NS.csv", sep= ""))
     """
+}
+process Enrichr { 
+    publishDir "${params.outdir}", mode:'copy'
+    maxForks 1   
+    errorStrategy 'retry'
+    maxRetries 3
+
+    input:
+    path(rds_file)
+
+    output:  
+    path("enrichment.pdf")
+
+    script:
+    """
+    #!/usr/bin/env Rscript 
+    library(enrichR)
+    important_genes <- readRDS("${rds_file}")
+    genes_alterados <- unique(important_genes\$gene_name)
+    setEnrichrSite("Enrichr") 
+    websiteLive <- TRUE
+    dbs <- listEnrichrDbs()
+    dbs <- c("$params.enrich_gene_set")
+    enriched <- enrichr(genes_alterados, dbs)   
+    enriched <- enriched[[1]][enriched[[1]]\$Adjusted.P.value < 0.05,]
+    pdf("enrichment.pdf",width = 16, height=9)
+    plotEnrich(enriched, showTerms = 10, numChar = 40, y = "Count", orderBy = "P.value", title = paste(dbs[1], " enrichment\n", sep = "" ))
+    dev.off()
+    """   
 }
 workflow QC1{
     take: data
@@ -529,11 +560,13 @@ workflow {
         params.Annotation = "/media/storage/Adolfo/MirScience/IDs_equivalencias_gencode.vM27.txt"
         params.transcripts_file = "/media/storage/Adolfo/MirScience/gencode.vM27.transcripts.fa"
         params.index_genome = "/media/storage/datasets/indexes/hisat2_index/Mus_musculus/Mm_GRCm39/GRCm39"
+        params.enrich_gene_set= "WikiPathways_2019_Mouse"
     } else if (params.Organism == "Homo_sapiens"){
         params.GTF = "/media/storage/datasets/gtf/human/gencode.v38.annotation.gtf"
         params.Annotation = "/media/storage/Adolfo/MirScience/IDs_equivalencias_gencode.v38.txt"
         params.transcripts_file = "/media/storage/Adolfo/MirScience/gencode.v38.transcripts.fa"
         params.index_genome = "/media/storage/datasets/indexes/hisat2_index/Homo_sapiens/grch38/genome"
+        params.enrich_gene_set= "GO_Biological_Process_2021"
     } else {
         close
     }
@@ -548,7 +581,8 @@ workflow {
     Trimm_QC2(Dowload_fastqs.out.fastqs)
     Map_and_count(Trimm_QC2.out)  
     Annotation_ch = Channel.fromPath(params.Annotation)
-    DESeq2(Map_and_count.out,Sample_table,Annotation_ch,params.Project)  
+    DESeq2(Map_and_count.out,Sample_table,Annotation_ch,params.Project) 
+    Enrichr(DESeq2.out.rds) 
 }
 workflow miRNAseq {
     params.outdir = "Resultados/miRNAseq/${params.Organism}/${params.Library_Layout}/${params.Project}/"
@@ -596,11 +630,13 @@ workflow short_reads_RNAseq {
         params.Annotation = "/media/storage/Adolfo/MirScience/IDs_equivalencias_gencode.vM27.txt"
         params.transcripts_file = "/media/storage/Adolfo/MirScience/gencode.vM27.transcripts.fa"
         params.index_genome = "/media/storage/datasets/indexes/hisat2_index/Mus_musculus/Mm_GRCm39/GRCm39"
+        params.enrich_gene_set= "WikiPathways_2019_Mouse"
     } else if (params.Organism == "Homo_sapiens"){
         params.GTF = "/media/storage/datasets/gtf/human/gencode.v38.annotation.gtf"
         params.Annotation = "/media/storage/Adolfo/MirScience/IDs_equivalencias_gencode.v38.txt"
         params.transcripts_file = "/media/storage/Adolfo/MirScience/gencode.v38.transcripts.fa"
         params.index_genome = "/media/storage/datasets/indexes/hisat2_index/Homo_sapiens/grch38/genome"
+        params.enrich_gene_set= "GO_Biological_Process_2021"
     } else {
         close
     }
@@ -615,7 +651,8 @@ workflow short_reads_RNAseq {
     Trimm_short_reads(Dowload_fastqs.out.fastqs)
     Map_and_count(Trimm_short_reads.out)  
     Annotation_ch = Channel.fromPath(params.Annotation)
-    DESeq2(Map_and_count.out,Sample_table,Annotation_ch,params.Project)  
+    DESeq2(Map_and_count.out,Sample_table,Annotation_ch,params.Project) 
+    Enrichr(DESeq2.out.rds) 
 }
 workflow Download_only { 
     params.outdir = "Resultados/${params.Organism}/${params.Library_Layout}/${params.Project}/"
